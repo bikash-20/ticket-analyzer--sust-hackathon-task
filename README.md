@@ -1,4 +1,6 @@
 # 🎫 Ticket Analyzer
+<img width="1280" height="756" alt="image" src="https://github.com/user-attachments/assets/942dbb05-8c66-4c31-9175-c0e23ca2831d" />
+<img width="390" height="121" alt="image" src="https://github.com/user-attachments/assets/9fb371eb-c5be-4515-92f3-08c9111f18a0" />
 
 A minimal full-stack application that accepts a support ticket, runs sentiment analysis on it with a tiny Hugging Face model, stores it in PostgreSQL, and shows the ticket history in a clean React UI.
 
