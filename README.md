@@ -16,174 +16,68 @@ A minimal full-stack application that accepts a support ticket, runs sentiment a
 
 ---
 
+## 🔗 Live Links
+
+| Resource        | URL                                                                 |
+|-----------------|---------------------------------------------------------------------|
+| GitHub repo     | https://github.com/bikash-20/Rentify-UI-design                      |
+| Backend image   | `docker.io/talukder20/ticket-analyzer-backend:v1`                    |
+| Frontend image  | `docker.io/talukder20/ticket-analyzer-frontend:v1`                   |
+| Local app       | http://localhost:3000                                               |
+| Health check    | http://localhost:8000/health → `{"status":"ok"}`                    |
+
+> Image digests pushed:
+> - backend  → `sha256:a9dcaad13ac9d0ae17f0cf20e6031967ed616b53d4c78a4ce7be2ad8daf0fbaf`
+> - frontend → `sha256:825b02580c20b6eb253ed124b5e5a6538b13a1705931e9195479cdf1612f1ac9`
+
+---
+
 ## 🏗 Architecture
 
-```
-React Frontend  (Nginx :3000)  --/api-->  FastAPI Backend  (:8000)  -->  PostgreSQL (:5432)
-                                          └─> Tiny HF Sentiment Model
-```
+## ☁️ Cloud VM Deployment
 
-- The frontend Nginx container **reverse-proxies `/api/*` → `http://backend:8000/`**, so the same image works on `localhost` and on a remote VM without CORS changes.
-- The backend **bakes the model weights into the Docker image** at build time using `from_pretrained()` + `HF_HOME=/opt/hf-cache`, and sets `TRANSFORMERS_OFFLINE=1` at runtime — so the container fails loudly if weights are missing rather than silently downloading on stage.
-- The model is **loaded into memory once at backend startup**, so the first ticket submission is fast.
-- The `tickets` table is **auto-created** via `Base.metadata.create_all(engine)` at startup, so a fresh Postgres volume works with no manual migrations.
+The repo ships a `docker-compose.prod.yml` that pulls the pre-built images from DockerHub instead of rebuilding — so the same artifact that you tested locally is what runs on the VM.
 
----
-
-## 📁 Repository Structure
-
-```
-ticket-analyzer/
-├── PRD.md
-├── README.md
-├── docker-compose.yml
-├── .gitignore
-├── backend/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── app/
-│       ├── __init__.py
-│       └── main.py
-└── frontend/
-    ├── Dockerfile
-    ├── nginx.conf
-    ├── package.json
-    ├── vite.config.js
-    ├── index.html
-    ├── .gitignore
-    └── src/
-        ├── main.jsx
-        ├── App.jsx
-        └── index.css
-```
-
----
-
-## 🚀 Local Setup
-
-### Prerequisites
-- Docker + Docker Compose v2
-- ~3 GB free disk (the backend image bakes ~250 MB of model weights)
-
-### Run
+### On the cloud VM
 
 ```bash
-# Build images and start the full stack
-docker compose up --build
+# 1. Install Docker + Docker Compose plugin
+sudo apt-get update && sudo apt-get install -y docker.io docker-compose-plugin
+
+# 2. Clone the repo
+git clone https://github.com/bikash-20/Rentify-UI-design.git
+cd Rentify-UI-design
+
+# 3. (optional) rename the folder for clarity
+# 4. Run the deployment script
+chmod +x deploy.sh
+./deploy.sh
 ```
 
-Open the app at **http://localhost:3000**.
+`deploy.sh` will:
+1. `docker compose -f docker-compose.prod.yml pull` — pull the latest `talukder20/ticket-analyzer-backend:v1` and `talukder20/ticket-analyzer-frontend:v1` images.
+2. `docker compose -f docker-compose.prod.yml up -d` — start `db`, `backend`, `frontend` as background services.
+3. Poll `http://localhost:8000/health` inside the backend container until it returns `{"status":"ok"}`.
 
-The first build takes a few minutes (it downloads the HF model weights inside the backend image build step). Subsequent builds use the Docker layer cache.
+### Open firewall / security group
 
-### Tear down
+Make sure your cloud VM's security group (AWS / DigitalOcean / Hetzner / etc.) allows inbound:
+- **TCP 80** — for the frontend (Nginx in the frontend container)
+- **TCP 22** — for SSH (already enabled by default)
+
+You do **not** need to expose **5432** (Postgres) or **8000** (backend) to the public internet — the frontend container proxies `/api` to the backend over the internal Docker network, and the backend talks to Postgres over the same network.
+
+### Verify the live deployment
 
 ```bash
-# Stop the stack (keep the database volume)
-docker compose down
-
-# Stop and WIPE the database
-docker compose down -v
+# From anywhere
+curl http://<VM-PUBLIC-IP>/health          # not proxied by nginx — see below
+curl http://<VM-PUBLIC-IP>/api/health      # should return {"status":"ok"}
+open  http://<VM-PUBLIC-IP>/                # React UI
 ```
 
----
-
-## 🔌 API Reference
-
-Base URL (through the frontend reverse proxy): `http://localhost:3000/api`
-
-### `GET /health`
-Returns backend status.
-
-```json
-{ "status": "ok" }
-```
-
-### `POST /tickets`
-Create a ticket and run sentiment analysis on it.
-
-Request:
-```json
-{
-  "title": "Lab VM issue",
-  "message": "My lab VM is not opening before the deadline.",
-  "category": "lab"
-}
-```
-
-Response (`201 Created`):
-```json
-{
-  "id": 1,
-  "title": "Lab VM issue",
-  "message": "My lab VM is not opening before the deadline.",
-  "category": "lab",
-  "sentiment": "NEGATIVE",
-  "confidence": 0.999,
-  "created_at": "2026-06-25T12:34:56"
-}
-```
-
-### `GET /tickets`
-List all saved tickets, **newest first** (`ORDER BY id DESC`).
-
-```json
-[
-  {
-    "id": 1,
-    "title": "Lab VM issue",
-    "message": "My lab VM is not opening before the deadline.",
-    "category": "lab",
-    "sentiment": "NEGATIVE",
-    "confidence": 0.999,
-    "created_at": "2026-06-25T12:34:56"
-  }
-]
-```
-
----
-
-## ⚙️ Environment Variables
-
-| Service   | Variable               | Default                                                                 |
-|-----------|------------------------|-------------------------------------------------------------------------|
-| `db`      | `POSTGRES_DB`          | `ticket_db`                                                             |
-| `db`      | `POSTGRES_USER`        | `postgres`                                                              |
-| `db`      | `POSTGRES_PASSWORD`    | `postgres`                                                              |
-| `backend` | `DATABASE_URL`         | `postgresql://postgres:postgres@db:5432/ticket_db`                      |
-| `backend` | `MODEL_NAME`           | `distilbert-base-uncased-finetuned-sst-2-english`                       |
-| `backend` | `HF_HOME`              | `/opt/hf-cache`                                                         |
-| `backend` | `TRANSFORMERS_OFFLINE` | `1`                                                                     |
-| `frontend`| `VITE_API_BASE_URL`    | `/api` (baked at build time, served via Nginx reverse proxy)            |
-
----
-
-## ✅ Acceptance Criteria
-
-- [x] Frontend opens successfully (locally and on the deployed endpoint).
-- [x] `GET /health` returns `status: ok`.
-- [x] A user can submit a ticket from the frontend.
-- [x] The backend analyzes ticket sentiment with the tiny Hugging Face model.
-- [x] Each ticket is saved in PostgreSQL and survives a page refresh.
-- [x] Backend container starts with **no network** to `huggingface.co` (weights are baked into the image).
-- [x] Fresh Postgres volume → table is auto-created, `POST /tickets` succeeds.
-- [x] Browser off-VM can submit a ticket (Nginx reverse-proxy + `/api` base URL).
-- [x] Sentiment output uses `POSITIVE`/`NEGATIVE` labels (real `distilbert-sst-2`).
-
----
-
-## 🛠 Troubleshooting
-
-| Issue | Fix |
-|---|---|
-| Backend exits with `Connection refused` on cold start | The Postgres healthcheck in `docker-compose.yml` already prevents this. If you see it, run `docker compose down -v` and `docker compose up --build` to reset the DB volume. |
-| `OSError: Can't load tokenizer for distilbert-base-uncased-finetuned-sst-2-english` at runtime | Model weights were not baked into the image. Rebuild without the cache: `docker compose build --no-cache backend`. |
-| Frontend shows "API down" | Check `docker compose logs backend` — most often a model-load or DB connection error. |
-| Port 3000 / 8000 / 5432 already in use | Change the host-side port in `docker-compose.yml` (e.g. `"8080:3000"` for the frontend). |
-| First demo request is slow | The model is loaded once at startup; the first `/tickets` POST should be fast. If slow, increase the VM CPU/memory. |
+> Tip: if you want a public `/health` URL too, add a second `location = /health { proxy_pass http://backend:8000/health; }` block to `frontend/nginx.conf`, rebuild, and repush the frontend image.
 
 ---
 
 ## 📜 License
-
-MIT — for educational/demo use as part of the SUST CSE Carnival 2026 workshop.

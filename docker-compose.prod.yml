@@ -1,0 +1,55 @@
+# Production / Cloud VM deployment
+# Pulls the pre-built images from DockerHub instead of building locally.
+# Usage on a cloud VM:
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  db:
+    image: postgres:15
+    container_name: ticket-analyzer-db
+    environment:
+      POSTGRES_DB: ticket_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # IMPORTANT: do NOT expose the DB port publicly on a cloud VM.
+    # Remove the next line only for local debugging.
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ticket_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    image: talukder20/ticket-analyzer-backend:v1
+    container_name: ticket-analyzer-backend
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ticket_db
+      MODEL_NAME: distilbert-base-uncased-finetuned-sst-2-english
+      HF_HOME: /opt/hf-cache
+      TRANSFORMERS_OFFLINE: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Frontend proxies /api -> backend:8000 inside the Docker network,
+    # so the backend does NOT need to be exposed to the public internet.
+    # Expose 8000 only if you want direct API access (e.g. via SSH tunnel).
+    # ports:
+    #   - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    image: talukder20/ticket-analyzer-frontend:v1
+    container_name: ticket-analyzer-frontend
+    depends_on:
+      - backend
+    ports:
+      - "80:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

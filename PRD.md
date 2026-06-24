@@ -80,6 +80,9 @@ Use a very small Hugging Face sentiment classification model. Suggested: `distil
 - Pre-build and push the backend image to DockerHub before the demo.
 
 ## 10. Docker & Deployment Requirements
+- **Backend image:** `talukder20/ticket-analyzer-backend:v1`
+- **Frontend image:** `talukder20/ticket-analyzer-frontend:v1`
+- **Database image:** official `postgres:15` image
 - Backend image installs `torch` from the CPU-only index to keep the image ~600–800 MB.
 - Backend Dockerfile bakes the model weights using `from_pretrained()` during build.
 - `Base.metadata.create_all(engine)` creates the `tickets` table on startup.
